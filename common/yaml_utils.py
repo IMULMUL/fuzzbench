@@ -12,20 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Yaml helpers."""
-import os
 import yaml
 
 
 def read(yaml_filename):
     """Reads and loads yaml file specified by |yaml_filename|."""
-    if not os.path.exists(yaml_filename):
-        raise Exception('Yaml file %s does not exist.' % yaml_filename)
-
-    with open(yaml_filename) as file_handle:
+    with open(yaml_filename, encoding='utf-8') as file_handle:
         return yaml.load(file_handle, yaml.SafeLoader)
 
 
 def write(yaml_filename, data):
     """Writes |data| to a new yaml file at |yaml_filename|."""
-    with open(yaml_filename, 'w') as file_handle:
+    with open(yaml_filename, 'w', encoding='utf-8') as file_handle:
         return yaml.dump(data, file_handle)

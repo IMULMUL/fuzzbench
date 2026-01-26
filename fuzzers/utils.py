@@ -33,11 +33,15 @@ LIBCPLUSPLUS_FLAG = '-stdlib=libc++'
 # Flags to use when using sanitizer for bug based benchmarking.
 SANITIZER_FLAGS = [
     '-fsanitize=address',
-    # Matches UBSan features enabled in OSS-Fuzz.
-    # See https://github.com/google/oss-fuzz/blob/master/infra/base-images/base-builder/Dockerfile#L94
+    # Matches UBSan features enabled in OSS-Fuzz. See
+    # https://github.com/google/oss-fuzz/blob/master/infra/base-images/base-builder/Dockerfile#L94
     '-fsanitize=array-bounds,bool,builtin,enum,float-divide-by-zero,function,'
     'integer-divide-by-zero,null,object-size,return,returns-nonnull-attribute,'
     'shift,signed-integer-overflow,unreachable,vla-bound,vptr',
+    '-fno-sanitize-recover=array-bounds,bool,builtin,enum,float-divide-by-zero,'
+    'function,integer-divide-by-zero,null,object-size,return,'
+    'returns-nonnull-attribute,shift,signed-integer-overflow,unreachable,'
+    'vla-bound,vptr',
 ]
 
 # Use these flags when compiling benchmark code without a sanitizer (e.g. when
@@ -49,6 +53,8 @@ NO_SANITIZER_COMPAT_CFLAGS = [
     '-pthread', '-Wl,--no-as-needed', '-Wl,-ldl', '-Wl,-lm',
     '-Wno-unused-command-line-argument'
 ]
+
+FUZZING_CFLAGS = ['-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION']
 
 OSS_FUZZ_LIB_FUZZING_ENGINE_PATH = '/usr/lib/libFuzzingEngine.a'
 BENCHMARK_CONFIG_YAML_PATH = '/benchmark.yaml'
@@ -71,8 +77,7 @@ def build_benchmark(env=None):
 
     benchmark = os.getenv('BENCHMARK')
     fuzzer = os.getenv('FUZZER')
-    print('Building benchmark {benchmark} with fuzzer {fuzzer}'.format(
-        benchmark=benchmark, fuzzer=fuzzer))
+    print(f'Building benchmark {benchmark} with fuzzer {fuzzer}')
     subprocess.check_call(['/bin/bash', '-ex', build_script], env=env)
 
 
@@ -90,13 +95,13 @@ def append_flags(env_var, additional_flags, env=None):
 
 def get_config_value(attribute):
     """Gets config attribute value from benchmark config yaml file."""
-    with open(BENCHMARK_CONFIG_YAML_PATH) as file_handle:
+    with open(BENCHMARK_CONFIG_YAML_PATH, encoding='utf-8') as file_handle:
         config = yaml.load(file_handle, yaml.SafeLoader)
         return config.get(attribute)
 
 
 @contextlib.contextmanager
-def restore_directory(directory):
+def restore_directory(directory, ignore_errors=False):
     """Helper contextmanager that when created saves a backup of |directory| and
     when closed/exited replaces |directory| with the backup.
 
@@ -121,7 +126,7 @@ def restore_directory(directory):
         backup = os.path.join(temp_dir, os.path.basename(directory))
         shutil.copytree(directory, backup, symlinks=True)
         yield
-        shutil.rmtree(directory)
+        shutil.rmtree(directory, ignore_errors=ignore_errors)
         shutil.move(backup, directory)
         try:
             os.getcwd()
@@ -144,7 +149,7 @@ def get_dictionary_path(target_binary):
         return None
 
     config = configparser.ConfigParser()
-    with open(options_file_path, 'r') as file_handle:
+    with open(options_file_path, 'r', encoding='utf-8') as file_handle:
         try:
             config.read_file(file_handle)
         except configparser.Error as error:
@@ -181,18 +186,20 @@ def set_compilation_flags(env=None):
 
     if get_config_value('type') == 'bug':
         append_flags('CFLAGS',
-                     SANITIZER_FLAGS + [BUGS_OPTIMIZATION_LEVEL],
+                     FUZZING_CFLAGS + SANITIZER_FLAGS +
+                     [BUGS_OPTIMIZATION_LEVEL],
                      env=env)
         append_flags('CXXFLAGS',
-                     SANITIZER_FLAGS +
+                     FUZZING_CFLAGS + SANITIZER_FLAGS +
                      [LIBCPLUSPLUS_FLAG, BUGS_OPTIMIZATION_LEVEL],
                      env=env)
     else:
         append_flags('CFLAGS',
-                     NO_SANITIZER_COMPAT_CFLAGS + [DEFAULT_OPTIMIZATION_LEVEL],
+                     FUZZING_CFLAGS + NO_SANITIZER_COMPAT_CFLAGS +
+                     [DEFAULT_OPTIMIZATION_LEVEL],
                      env=env)
         append_flags('CXXFLAGS',
-                     NO_SANITIZER_COMPAT_CFLAGS +
+                     FUZZING_CFLAGS + NO_SANITIZER_COMPAT_CFLAGS +
                      [LIBCPLUSPLUS_FLAG, DEFAULT_OPTIMIZATION_LEVEL],
                      env=env)
 
@@ -203,8 +210,7 @@ def initialize_env(env=None):
     set_compilation_flags(env)
 
     for env_var in ['FUZZ_TARGET', 'CFLAGS', 'CXXFLAGS']:
-        print('{env_var} = {env_value}'.format(env_var=env_var,
-                                               env_value=os.getenv(env_var)))
+        print(f'{env_var} = {os.getenv(env_var)}')
 
 
 def get_env(env_var, default_value=None):
@@ -232,5 +238,5 @@ def create_seed_file_for_empty_corpus(input_corpus):
 
     print('Creating a fake seed file in empty corpus directory.')
     default_seed_file = os.path.join(input_corpus, 'default_seed')
-    with open(default_seed_file, 'w') as file_handle:
+    with open(default_seed_file, 'w', encoding='utf-8') as file_handle:
         file_handle.write('hi')

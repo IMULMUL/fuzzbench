@@ -24,6 +24,7 @@ import threading
 import time
 from typing import List
 
+from common import random_corpus_fuzzing_utils
 from common import experiment_path as exp_path
 from common import experiment_utils
 from common import logs
@@ -41,8 +42,8 @@ LOOP_WAIT_SECONDS = 5 * 60
 # TODO(metzman): Convert more uses of os.path.join to exp_path.path.
 
 
-def _get_config_path():
-    """Return config directory."""
+def _get_config_file_path():
+    """Return config file path."""
     return exp_path.path(
         experiment_utils.get_internal_experiment_config_relative_path())
 
@@ -100,15 +101,13 @@ class Experiment:  # pylint: disable=too-many-instance-attributes
         self.num_trials = self.config['trials']
         self.experiment_name = self.config['experiment']
         self.git_hash = self.config['git_hash']
-        self.concurrent_builds = self.config['concurrent_builds']
         self.preemptible = self.config.get('preemptible_runners')
+        self.micro_experiment = self.config.get('micro_experiment')
 
 
-def build_images_for_trials(fuzzers: List[str],
-                            benchmarks: List[str],
+def build_images_for_trials(fuzzers: List[str], benchmarks: List[str],
                             num_trials: int,
-                            preemptible: bool,
-                            concurrent_builds=None) -> List[models.Trial]:
+                            preemptible: bool) -> List[models.Trial]:
     """Builds the images needed to run |experiment| and returns a list of trials
     that can be run for experiment. This is the number of trials specified in
     experiment times each pair of fuzzer+benchmark that builds successfully."""
@@ -117,14 +116,8 @@ def build_images_for_trials(fuzzers: List[str],
     builder.build_base_images()
 
     # Only build fuzzers for benchmarks whose measurers built successfully.
-    if concurrent_builds is None:
-        benchmarks = builder.build_all_measurers(benchmarks)
-        build_successes = builder.build_all_fuzzer_benchmarks(
-            fuzzers, benchmarks)
-    else:
-        benchmarks = builder.build_all_measurers(benchmarks, concurrent_builds)
-        build_successes = builder.build_all_fuzzer_benchmarks(
-            fuzzers, benchmarks, concurrent_builds)
+    benchmarks = builder.build_all_measurers(benchmarks)
+    build_successes = builder.build_all_fuzzer_benchmarks(fuzzers, benchmarks)
     experiment_name = experiment_utils.get_experiment_name()
     trials = []
     for fuzzer, benchmark in build_successes:
@@ -132,7 +125,8 @@ def build_images_for_trials(fuzzers: List[str],
             models.Trial(fuzzer=fuzzer,
                          experiment=experiment_name,
                          benchmark=benchmark,
-                         preemptible=preemptible) for _ in range(num_trials)
+                         preemptible=preemptible,
+                         trial_group_num=trial) for trial in range(num_trials)
         ]
         trials.extend(fuzzer_benchmark_trials)
     return trials
@@ -149,16 +143,19 @@ def dispatcher_main():
     if experiment_utils.is_local_experiment():
         models.Base.metadata.create_all(db_utils.engine)
 
-    experiment_config_file_path = _get_config_path()
+    experiment_config_file_path = _get_config_file_path()
     experiment = Experiment(experiment_config_file_path)
 
     _initialize_experiment_in_db(experiment.config)
 
     trials = build_images_for_trials(experiment.fuzzers, experiment.benchmarks,
                                      experiment.num_trials,
-                                     experiment.preemptible,
-                                     experiment.concurrent_builds)
+                                     experiment.preemptible)
     _initialize_trials_in_db(trials)
+
+    if experiment.micro_experiment:
+        random_corpus_fuzzing_utils.initialize_random_corpus_fuzzing(
+            experiment.benchmarks, experiment.num_trials)
 
     create_work_subdirs(['experiment-folders', 'measurement-folders'])
 
@@ -205,11 +202,11 @@ def main():
     except Exception as error:
         logs.error('Error conducting experiment.')
         raise error
-    experiment_config_file_path = os.path.join(_get_config_path(),
-                                               'experiment.yaml')
 
     if experiment_utils.is_local_experiment():
         return 0
+
+    experiment_config_file_path = _get_config_file_path()
 
     if stop_experiment.stop_experiment(experiment_utils.get_experiment_name(),
                                        experiment_config_file_path):

@@ -15,12 +15,14 @@
 ARG parent_image
 FROM $parent_image
 
-# Download and compile AFL v2.56b.
+# Download and compile AFL v2.57b.
 # Set AFL_NO_X86 to skip flaky tests.
-RUN git clone https://github.com/google/AFL.git /afl && \
+RUN git clone \
+        --depth 1 \
+        --branch v2.57b \
+        https://github.com/google/AFL.git /afl && \
     cd /afl && \
-    git checkout 82b5e359463238d790cadbe2dd494d6a4928bff3 && \
-    AFL_NO_X86=1 make
+    CFLAGS= CXXFLAGS= AFL_NO_X86=1 make
 
 # Use afl_driver.cpp from LLVM as our fuzzing library.
 RUN apt-get update && \

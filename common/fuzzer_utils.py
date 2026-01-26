@@ -18,6 +18,7 @@ import os
 import re
 from typing import Optional
 
+from common import fuzzer_config
 from common import logs
 from common import utils
 
@@ -117,7 +118,7 @@ def validate(fuzzer):
         return False
 
     # Try importing the fuzzer module.
-    module_name = 'fuzzers.{}.fuzzer'.format(fuzzer)
+    module_name = f'fuzzers.{fuzzer}.fuzzer'
     try:
         importlib.import_module(module_name)
         return True
@@ -139,3 +140,9 @@ def get_fuzzer_names():
         fuzzers.append(fuzzer)
 
     return fuzzers
+
+
+def get_languages(fuzzer):
+    """Returns the programming languages |fuzzer| can fuzz."""
+    config = fuzzer_config.get_config(fuzzer)
+    return config.get('languages', ['c++'])
